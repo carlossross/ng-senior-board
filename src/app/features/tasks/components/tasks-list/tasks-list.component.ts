@@ -1,9 +1,10 @@
 import { Component, inject } from '@angular/core';
 import { TASKS_STORE } from '../../store/tasks.store';
+import { RouterLink } from '@angular/router';
 
 @Component({
   selector: 'app-tasks-list',
-  imports: [],
+  imports: [RouterLink],
   template: `
     <section>
       <h2>Mis Tareas</h2>
@@ -16,7 +17,9 @@ import { TASKS_STORE } from '../../store/tasks.store';
         <li>
           <label>
             <input type="checkbox" [checked]="task.done" (change)="store.toggle(task.id)" />
-            <span [class.done]="task.done">{{ task.title }}</span>
+            <a [routerLink]="['/tasks', task.id]" [class.done]="task.done">
+              {{ task.title }}
+            </a>
           </label>
         </li>
         }

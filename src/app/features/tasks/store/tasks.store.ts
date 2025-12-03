@@ -1,23 +1,56 @@
-import { computed, effect, InjectionToken, Provider, signal } from '@angular/core';
+import { computed, effect, inject, InjectionToken, Provider, signal } from '@angular/core';
+import { Task } from '../task.model';
+import { TasksApiService } from '../tasks-api.service';
+import { catchError, finalize, of, tap } from 'rxjs';
 
-export interface Task {
-  id: string;
-  title: string;
-  done: boolean;
-}
+// function createInitialTasks(): Task[] {
+//   return [
+//     { id: '1', title: 'Aprender signals en angular', done: false },
+//     { id: '2', title: 'Diseña arquitectura por features', done: false },
+//     { id: '3', title: 'Configurar scoped DI para tasks', done: false },
+//   ];
+// }
 
-function createInitialTasks(): Task[] {
-  return [
-    { id: '1', title: 'Aprender signals en angular', done: false },
-    { id: '2', title: 'Diseña arquitectura por features', done: false },
-    { id: '3', title: 'Configurar scoped DI para tasks', done: false },
-  ];
+const TASKS_STORAGE_KEY = 'ng-senior-board.tasks';
+
+function loadInitialTasks(): Task[] {
+  if (typeof localStorage === 'undefined') {
+    // SSR / entornos raros, regresamos fallback
+    return [
+      { id: '1', title: 'Aprender signals en Angular', done: false },
+      { id: '2', title: 'Diseñar arquitectura por features', done: false },
+      { id: '3', title: 'Configurar scoped DI para tasks', done: false },
+    ];
+  }
+
+  try {
+    const raw = localStorage.getItem(TASKS_STORAGE_KEY);
+    if (!raw) {
+      return [
+        { id: '1', title: 'Aprender signals en Angular', done: false },
+        { id: '2', title: 'Diseñar arquitectura por features', done: false },
+        { id: '3', title: 'Configurar scoped DI para tasks', done: false },
+      ];
+    }
+
+    const parsed = JSON.parse(raw) as Task[];
+    // Validación simple
+    if (!Array.isArray(parsed)) return [];
+    return parsed;
+  } catch {
+    return [];
+  }
 }
 
 export function createTasksStore() {
+  const api = inject(TasksApiService);
+
   // STATE
-  const tasks = signal<Task[]>(createInitialTasks());
+  const tasks = signal<Task[]>(loadInitialTasks());
   const filter = signal<'all' | 'completed' | 'pending'>('all');
+
+  const loading = signal(false);
+  const error = signal<string | null>(null);
 
   // SELECTORS
   const filtered = computed(() => {
@@ -33,10 +66,10 @@ export function createTasksStore() {
     return list;
   });
 
-  const count = computed(() => {
-    total: tasks().length;
-    done: tasks().filter((task) => task.done).length;
-  });
+  const count = computed(() => ({
+    total: tasks().length,
+    done: tasks().filter((task) => task.done).length,
+  }));
 
   //ATCTIONS
   const add = (title: string) => {
@@ -59,15 +92,59 @@ export function createTasksStore() {
     filter.set(f);
   };
 
+  const clearCompleted = () => {
+    tasks.update((list) => list.filter((t) => !t.done));
+  };
+
+  const clearAll = () => {
+    tasks.set([]);
+  };
+
+  const update = (id: string, changes: Partial<Pick<Task, 'title' | 'done'>>) => {
+    tasks.update((list) => list.map((t) => (t.id === id ? { ...t, ...changes } : t)));
+  };
+
+  const loadFromApi = () => {
+    loading.set(true);
+    error.set(null);
+
+    api
+      .getTasks()
+      .pipe(
+        tap((response) => {
+          tasks.set(response);
+        }),
+        catchError((err) => {
+          error.set(err.message ?? 'Error cargando tareas');
+          return of([]); // devolvemos lista vacía para fallback
+        }),
+        finalize(() => {
+          loading.set(false);
+        })
+      )
+      .subscribe();
+  };
+
   // EFFECTS
+  // effect(() => {
+  //   console.log('[TasksStore] tasks changed:', tasks().length);
+  // });
+
   effect(() => {
-    console.log('[TasksStore] tasks changed:', tasks().length);
+    const current = tasks();
+    console.log('[TasksStore] tasks changed:', current.length);
+
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(TASKS_STORAGE_KEY, JSON.stringify(current));
+    }
   });
 
   return {
     // state
     tasks,
     filter,
+    loading,
+    error,
 
     // selectors
     filtered,
@@ -78,6 +155,10 @@ export function createTasksStore() {
     toggle,
     remove,
     setFilter,
+    clearCompleted,
+    clearAll,
+    update,
+    loadFromApi,
   };
 }
 
